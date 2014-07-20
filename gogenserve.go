@@ -9,7 +9,19 @@ import (
 	"strings"
 )
 
-type GenHandler func(conn *GenConn) error
+type GenAddr struct {
+	Proto string
+	Addr  string
+	Path  string
+}
+
+type GenListener interface {
+	OnConnect(conn *GenConn)
+	OnRecv(conn *GenConn, data []byte, size int)
+	OnDisconnect(conn *GenConn)
+	OnError(conn *GenConn, err error)
+	Addr() *GenAddr
+}
 
 type GenConn struct {
 	Transport string
@@ -26,17 +38,12 @@ func (g *GenConn) Recv(data []byte) (net.Addr, error) {
 }
 
 type GenServer interface {
-	Listen(proto, addr string, conn chan<- *GenConn)
-	ListenTCP(addr string, conn chan<- *GenConn)
-	ListenUDP(addr string, conn chan<- *GenConn)
-	MapWSPath(path string, conn chan<- *GenConn)
-	ListenWS(addr, path string, conn chan<- *GenConn)
-	ListenWSS(addr, path, certFile, keyFile, conn chan<- *GenConn)
-	OnConnect(conn chan<- *GenConn)
-	OnError(conn chan<- *GenConn)
-	OnDisconnect(conn chan<- *GenConn)
-	OnSent(conn chan<- *GenConn)
-	OnRecv(conn chan<- *GenConn)
+	Listen(listener *GenListener)
+	ListenTCP(listener *GenListener)
+	ListenUDP(listener *GenListener)
+	MapWSPath(listener *GenListener)
+	ListenWS(listener *GenListener)
+	ListenWSS(listener *GenListener, certFile, keyFile string)
 }
 
 type GenServe struct {
@@ -46,75 +53,132 @@ func NewGenServe() *GenServe {
 	return &GenServe{}
 }
 
-func (g *GenServe) Listen(proto, addr string, conn chan<- *GenConn) {
-	if strings.HasPrefix(proto, "tcp") {
-		g.listenTCP(proto, addr, conn)
+func (g *GenServe) Listen(listener *GenListener) {
+	addr := listener.Addr()
+	if addr.Proto == "" || addr.Addr == "" {
+		log.Fatal("Protocol or Address invalid for Listen.")
+	}
+
+	if strings.HasPrefix(addr.Proto, "tcp") {
+		g.listenTCP(listener)
 	} else {
-		g.listenUDP(proto, addr, conn)
+		g.listenUDP(listener)
 	}
 }
 
-func (g *GenServe) ListenUDP(addr string, conn chan<- *GenConn) {
-	g.listenUDP("udp", addr, conn)
+func (g *GenServe) ListenUDP(listener *GenListener) {
+	if listener.Addr().Proto == "" {
+		listener.Addr().Proto = "udp"
+	}
+
+	if !strings.HasPrefix(listener.Addr().Proto, "udp") {
+		log.Fatal("Invalid protocol set for ListenUDP")
+	}
+	g.listenUDP(listener)
 }
 
-func (g *GenServe) listenUDP(proto, addr, conn chan<- *GenConn) {
-	udp := net.ResolveUDPAddr(proto, addr)
-	ln, err := net.ListenUDP(proto, udp)
+func (g *GenServe) listenUDP(listener *GenListener) {
+	addr := listener.Addr()
+	if addr.Addr == nil || addr.Addr == "" {
+		log.Fatal("Address not set for UDP server")
+	}
+
+	udp := net.ResolveUDPAddr(addr.Addr, addr.Proto)
+	ln, err := net.ListenUDP(addr.Proto, udp)
 	if err != nil {
-		log.Fatalf("Error listenong on %s socket at %s, %v", proto, addr, err)
+		log.Fatalf("Error listening on %s socket at %s, %v", addr.Proto, addr.Addr, err)
+	}
+}
+
+func (g *GenServe) ListenTCP(listener *GenListener) {
+	if listener.Addr().Proto == "" {
+		listener.Addr().Proto = "tcp"
 	}
 
+	if !strings.HasPrefix(listener.Addr().Proto, "tcp") {
+		log.Fatal("Invalid protocol set for ListenTCP")
+	}
+	g.listenTCP(listener)
 }
 
-func (g *GenServe) ListenTCP(addr string, conn chan<- *GenConn) {
-	g.listenTCP("tcp", addr, conn)
-}
+func (g *GenServe) listenTCP(listener *GenListener) {
+	addr := listener.Addr()
+	if addr.Addr == nil || addr.Addr == "" {
+		log.Fatal("Address not set for UDP server")
+	}
 
-func (g *GenServe) listenTCP(proto, addr string, conn chan<- *GenConn) {
-	ln, err := net.Listen(proto, addr)
+	ln, err := net.Listen(addr.Proto, addr.Addr)
 	if err != nil {
-		log.Fatalf("Error listening on %s socket at %s, %v", proto, addr, err)
+		log.Fatalf("Error listening on %s socket at %s, %v", addr.Proto, addr.Addr, err)
 	}
-
-	go func(conn chan<- *GenConn) {
+	// accept loop
+	go func() {
 		for {
 			c, err := ln.Accept()
 			if err != nil {
-				conn <- &GenConn{Transport: proto, Err: err}
+				conn := &GenConn{Transport: proto, Err: err}
+				listener.OnError(conn, err)
 				continue
 			}
-			conn <- &GenConn{Transport: proto, conn: c}
+			newConn := &GenConn{Transport: proto, conn: c}
+			listener.OnConnect(newConn)
+			// read loop
+			go func() {
+
+				read(listener, newConn)
+			}()
 		}
-	}(conn)
+	}()
 }
 
-func (g *GenServe) MapWSPath(path string, conn chan<- *GenConn) {
+func (g *GenServe) MapWSPath(listener *GenListener) {
 	http.Handle(path, websocket.Handler(func(ws *websocket.Conn) {
-		webSocketHandler(ws, conn)
+		webSocketHandler(ws, listener)
 	}))
 }
 
-func (g *GenServe) ListenWS(addr string) {
+func (g *GenServe) ListenWS(listener *GenListener) {
 	go func() {
-		err := http.ListenAndServe(addr, nil)
+		err := http.ListenAndServe(listener.Addr().Addr, nil)
 		if err != nil {
-			log.Fatalf("error listening on %s: %v", addr, err)
+			log.Fatalf("error listening on %s: %v", listener.Addr().Addr, err)
 		}
 	}()
 }
 
-func (g *GenServe) ListenWSS(addr, certFile, keyFile string, conn chan<- *GenConn) {
+func (g *GenServe) ListenWSS(listener *GenListener, certFile, keyFile string) {
 	go func() {
-		err := http.ListenAndServeTLS(addr, certFile, keyFile, nil)
+		err := http.ListenAndServeTLS(listener.Addr().Addr, certFile, keyFile, nil)
 		if err != nil {
-			conn <- &GenConn{Err: err}
+			log.Fatalf("error listening on %s: %v", listener.Addr().Addr, err)
+		}
+	}()
+}
+
+func webSocketHandler(ws *websocket.Conn, listener *GenListener) {
+	newConn := &GenConn{Transport: "websocket", conn: ws}
+	listener.OnConnect(newConn)
+	for ws.IsClientConnected() && ws.IsServerConn() {
+		read(listener, newConn)
+	}
+	listener.OnDisconnect(newConn)
+}
+
+func read(listener *GenListener, conn *GenConn) {
+	size := 0
+	data := new([]byte, 1024)
+	for {
+		msg := new([]byte, 512)
+		n, err := conn.conn.Read(msg)
+		if err != nil {
+			listener.OnError(newConn, err)
 			return
 		}
-	}()
-}
-
-func webSocketHandler(ws *websocket.Conn, conn chan<- *GenConn) {
-	newConn := &GenConn{Transport: "websocket", conn: ws}
-	conn <- newConn
+		data := append(data, msg)
+		size += n
+		if n == 0 {
+			listener.OnRecv(newConn, data, size)
+			return
+		}
+	}
 }

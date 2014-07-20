@@ -8,6 +8,25 @@ import (
 	"time"
 )
 
+type DefaultObserve struct {
+}
+
+func (d *DefaultObserve) OnConnect(conn *GenConn) {
+	fmt.Printf("Yup got connection %v\n", conn)
+}
+
+func (d *DefaultObserve) OnDisconnect(conn *GenConn) {
+	fmt.Printf("Yup connection dropped %v\n", conn)
+}
+
+func (d *DefaultObserve) OnRecv(conn *GenConn, data []byte) {
+	fmt.Printf("Yup got data %s from connection %v\n", conn, string(data))
+}
+
+func (d *DefaultObserve) OnError(conn *GenConn) {
+	fmt.Printf("Yup got error %v\n", conn)
+}
+
 func TestNewTcpServer(t *testing.T) {
 	addr := ":8333"
 	serve := NewGenServe()
