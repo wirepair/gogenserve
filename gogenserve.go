@@ -39,12 +39,14 @@ type GenConn struct {
 // GenServer - a generic server which offers various protocols to listen on, uses a listener
 // to dispatch events as clients connect/send data.
 type GenServer interface {
-	Listen(addr *GenAddr, listener GenListener)        // given the provided addr information, bind a service and dispatch to listener (TCP/UDP only)
-	ListenTCP(addr *GenAddr, listener GenListener)     // dispatch TCP events to listener
-	ListenUDP(addr *GenAddr, listener GenListener)     // dispatch UDP events to listener
-	MapWSPath(addr *GenAddr, listener GenListener)     // map a websocket path with a listener
-	ListenWS(addr *GenAddr)                            // listen on an address
-	ListenWSS(addr *GenAddr, certFile, keyFile string) // listen on an secured websocket address
+	Listen(addr *GenAddr, listener GenListener)     // given the provided addr information, bind a service and dispatch to listener (TCP/UDP only)
+	ListenTCP(addr *GenAddr, listener GenListener)  // dispatch TCP events to listener
+	ListenUDP(addr *GenAddr, listener GenListener)  // dispatch UDP events to listener
+	MapWSPath(addr *GenAddr, listener GenListener)  // map a websocket path with a listener
+	ListenWS(net string)                            // listen on the passed in network address (127.0.0.1:8333, :8333)
+	ListenWSS(net string, certFile, keyFile string) // listen on an secured websocket address
+	// TODO: Support ListenTCPS for TLS servers
+	// TODO: Support ListenUNIX for Unix Domain Sockets
 }
 
 // GenServe - implementation of our GenServer
@@ -149,7 +151,7 @@ func (g *GenServe) listenTCP(addr *GenAddr, listener GenListener) {
 // MapWSPath - Maps a websocket path to a listener for dispatching events to. Should
 // be called prior to calling ListenWS or ListenWSS
 // It is possible to map the same listener to multiple paths, provided the passed
-// in addr is has a different Path defined.
+// in addr has a different Path defined.
 func (g *GenServe) MapWSPath(addr *GenAddr, listener GenListener) {
 	http.Handle(addr.Path, websocket.Handler(func(ws *websocket.Conn) {
 		webSocketHandler(ws, listener)
@@ -157,21 +159,21 @@ func (g *GenServe) MapWSPath(addr *GenAddr, listener GenListener) {
 }
 
 // ListenWS - Listens on the given address for WebSocket connections, MapWSPath should be called first
-func (g *GenServe) ListenWS(addr *GenAddr) {
+func (g *GenServe) ListenWS(net string) {
 	go func() {
-		err := http.ListenAndServe(addr.Addr, nil)
+		err := http.ListenAndServe(net, nil)
 		if err != nil {
-			log.Fatalf("error listening on %s: %v", addr.Addr, err)
+			log.Fatalf("error listening on %s: %v", net, err)
 		}
 	}()
 }
 
 // ListenWS - Listens on the given address for secured WebSocket connections, MapWSPath should be called first
-func (g *GenServe) ListenWSS(addr *GenAddr, certFile, keyFile string) {
+func (g *GenServe) ListenWSS(net string, certFile, keyFile string) {
 	go func() {
-		err := http.ListenAndServeTLS(addr.Addr, certFile, keyFile, nil)
+		err := http.ListenAndServeTLS(net, certFile, keyFile, nil)
 		if err != nil {
-			log.Fatalf("error listening on %s: %v", addr.Addr, err)
+			log.Fatalf("error listening on %s: %v", net, err)
 		}
 	}()
 }
@@ -182,10 +184,15 @@ func (g *GenServe) ListenWSS(addr *GenAddr, certFile, keyFile string) {
 func webSocketHandler(ws *websocket.Conn, listener GenListener) {
 	newConn := &GenConn{Transport: "websocket", Conn: ws}
 	listener.OnConnect(newConn)
-	for ws.IsServerConn() {
-		go read(listener, newConn)
-	}
-	listener.OnDisconnect(newConn)
+	go func() {
+		//for ws.IsServerConn() {
+		log.Printf("start reading %v\n", ws.IsServerConn())
+		read(listener, newConn)
+		log.Printf("er, done reading %v\n", ws.IsServerConn())
+		//}
+	}()
+
+	//listener.OnDisconnect(newConn)
 }
 
 // read - Reads bytes from theconnection and dispatches OnRecv events. If io.EOF is returned
@@ -197,6 +204,7 @@ func read(listener GenListener, conn *GenConn) {
 		n, err := conn.Conn.Read(msg[0:])
 		if err == io.EOF {
 			listener.OnDisconnect(conn)
+			return
 		}
 		if err != nil {
 			log.Printf("error %v\n", err)
