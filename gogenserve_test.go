@@ -6,7 +6,6 @@ import (
 	"net"
 	"sync"
 	"testing"
-	//"time"
 )
 
 type DefaultListener struct {
@@ -24,7 +23,10 @@ func (d *DefaultListener) OnDisconnect(conn *GenConn) {
 }
 
 func (d *DefaultListener) OnRecv(conn *GenConn, data []byte, size int) {
-	fmt.Printf("Yup got data %s from connection %v\n", conn, string(data))
+	fmt.Printf("Yup got data %s size: %d from connection %v\n", data[0:size], size, conn)
+	if size != 0 {
+		d.wg.Done()
+	}
 }
 
 func (d *DefaultListener) OnError(conn *GenConn, err error) {
@@ -39,13 +41,20 @@ func NewListener(proto, addr string) *DefaultListener {
 	l := new(DefaultListener)
 	l.addr = &GenAddr{Proto: proto, Addr: addr}
 	l.wg = new(sync.WaitGroup)
+	l.wg.Add(1) // for connection
 	return l
 }
 
 func TestNewTcpServer(t *testing.T) {
 	listener := NewListener("tcp", ":8333")
+	listener.wg.Add(1)
 	serve := NewGenServe()
+	fmt.Printf("listening...")
 	serve.ListenTCP(listener)
+	conn := tcpConnection("localhost:8333", t)
+	fmt.Printf("Sending zoops")
+	conn.Write([]byte("zooops"))
+	conn.Close()
 	listener.wg.Wait()
 }
 
@@ -114,31 +123,32 @@ func TestNewMultiServer(t *testing.T) {
 	}
 }
 */
-func udpConnection(addr string, t *testing.T) {
-	connect("udp", addr, t)
+func udpConnection(addr string, t *testing.T) net.Conn {
+	return connect("udp", addr, t)
 }
 
-func tcpConnection(addr string, t *testing.T) {
-	connect("tcp", addr, t)
+func tcpConnection(addr string, t *testing.T) net.Conn {
+	return connect("tcp", addr, t)
 }
 
-func wsConnection(addr, path string, t *testing.T) {
+func wsConnection(addr, path string, t *testing.T) net.Conn {
 	client, err := net.Dial("tcp", addr)
 	if err != nil {
 		t.Fatal("dialing", err)
 	}
 	_, err = websocket.NewClient(newConfig(t, addr, path), client)
 	if err != nil {
-		t.Errorf("WebSocket handshake error: %v", err)
-		return
+		t.Fatalf("WebSocket handshake error: %v", err)
 	}
+	return client
 }
 
-func connect(proto, addr string, t *testing.T) {
-	_, err := net.Dial(proto, addr)
+func connect(proto, addr string, t *testing.T) net.Conn {
+	conn, err := net.Dial(proto, addr)
 	if err != nil {
 		t.Fatalf("error connecting to %s due to: %v", addr, err)
 	}
+	return conn
 }
 
 func newConfig(t *testing.T, addr, path string) *websocket.Config {

@@ -3,6 +3,8 @@ package gogenserve
 import (
 	"code.google.com/p/go.net/websocket"
 	//"fmt"
+	"bytes"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -125,7 +127,6 @@ func (g *GenServe) listenTCP(listener GenListener) {
 			listener.OnConnect(newConn)
 			// read loop
 			go func() {
-
 				read(listener, newConn)
 			}()
 		}
@@ -166,20 +167,22 @@ func webSocketHandler(ws *websocket.Conn, listener GenListener) {
 }
 
 func read(listener GenListener, conn *GenConn) {
-	size := 0
-	data := make([]byte, 1024)
+	data := bytes.NewBuffer(nil)
+	var msg [512]byte
 	for {
-		msg := make([]byte, 512)
-		n, err := conn.conn.Read(msg)
-		if err != nil {
+		log.Printf("about to read")
+		n, err := conn.conn.Read(msg[0:])
+		if err != nil && err != io.EOF {
+			log.Printf("error %v\n", err)
 			listener.OnError(conn, err)
 			return
 		}
-		data := append(data, msg...)
-		size += n
-		if n == 0 {
-			listener.OnRecv(conn, data, size)
-			return
+		data.Write(msg[0:n])
+		log.Printf("done reading")
+		log.Printf("%v\n", err)
+		if err == io.EOF {
+			listener.OnRecv(conn, data.Bytes(), len(data.Bytes()))
+			data.Reset()
 		}
 	}
 }
