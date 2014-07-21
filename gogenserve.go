@@ -33,7 +33,7 @@ type GenListener interface {
 // GenConn - a generic connection structure holding the transport and the underlying net.Conn
 type GenConn struct {
 	Transport string
-	conn      net.Conn
+	Conn      net.Conn
 }
 
 // GenServer - a generic server which offers various protocols to listen on, uses a listener
@@ -98,7 +98,7 @@ func (g *GenServe) listenUDP(addr *GenAddr, listener GenListener) {
 	if err != nil {
 		log.Fatalf("Error listening on %s socket at %s, %v\n", addr.Proto, addr.Addr, err)
 	}
-	newConn := &GenConn{Transport: addr.Proto, conn: ln}
+	newConn := &GenConn{Transport: addr.Proto, Conn: ln}
 	go func() {
 		for {
 			read(listener, newConn)
@@ -138,7 +138,7 @@ func (g *GenServe) listenTCP(addr *GenAddr, listener GenListener) {
 				listener.OnError(conn, err)
 				continue
 			}
-			newConn := &GenConn{Transport: addr.Proto, conn: c}
+			newConn := &GenConn{Transport: addr.Proto, Conn: c}
 			listener.OnConnect(newConn)
 			// read loop
 			go read(listener, newConn)
@@ -180,7 +180,7 @@ func (g *GenServe) ListenWSS(addr *GenAddr, certFile, keyFile string) {
 // go routines. Once IsServerConn returns false, the connection is considered dead and an OnDisconnect
 // event is dispatched.
 func webSocketHandler(ws *websocket.Conn, listener GenListener) {
-	newConn := &GenConn{Transport: "websocket", conn: ws}
+	newConn := &GenConn{Transport: "websocket", Conn: ws}
 	listener.OnConnect(newConn)
 	for ws.IsServerConn() {
 		go read(listener, newConn)
@@ -194,7 +194,7 @@ func read(listener GenListener, conn *GenConn) {
 	data := bytes.NewBuffer(nil)
 	msg := make([]byte, listener.ReadSize())
 	for {
-		n, err := conn.conn.Read(msg[0:])
+		n, err := conn.Conn.Read(msg[0:])
 		if err == io.EOF {
 			listener.OnDisconnect(conn)
 		}
