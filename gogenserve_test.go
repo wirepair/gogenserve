@@ -60,7 +60,7 @@ func TestNewWSServer(t *testing.T) {
 	listener.wg.Add(1)
 	serve := NewGenServe()
 	serve.MapWSPath(addr, listener)
-	serve.ListenWS(addr)
+	serve.ListenWS(addr.Addr)
 	conn := wsConnection("localhost:8333", "/bonk", t)
 	_, err := conn.Write([]byte("zooops"))
 	if err != nil {
@@ -92,6 +92,29 @@ func TestMultiUDPClients(t *testing.T) {
 	listener.wg.Wait()
 }
 
+func TestMultiWSPathsClients(t *testing.T) {
+	listener := NewListener()
+	addrBonk := &GenAddr{Proto: "ws", Addr: ":8333", Path: "/bonk"}
+	addrDonk := &GenAddr{Proto: "ws", Addr: ":8333", Path: "/donk"}
+	listener.wg.Add(3)
+	serve := NewGenServe()
+	serve.MapWSPath(addrBonk, listener)
+	serve.MapWSPath(addrDonk, listener)
+	serve.ListenWS(addrBonk.Addr)
+	conn := wsConnection("localhost:8333", "/bonk", t)
+	_, err := conn.Write([]byte("bonk zoops"))
+	if err != nil {
+		t.Fatalf("err not nil: %v\n", err)
+	}
+	conn.Close()
+	conn = wsConnection("localhost:8333", "/donk", t)
+	_, err = conn.Write([]byte("donk zoops"))
+	if err != nil {
+		t.Fatalf("err not nil: %v\n", err)
+	}
+	listener.wg.Wait()
+}
+
 // TestNewMultiServer demonstrates the ability to register
 // the same listener to multiple services.
 func TestNewMultiServer(t *testing.T) {
@@ -104,7 +127,7 @@ func TestNewMultiServer(t *testing.T) {
 	serve.ListenTCP(addrTcp, listener)
 	serve.ListenUDP(addrUdp, listener)
 	serve.MapWSPath(addrWs, listener)
-	serve.ListenWS(addrWs)
+	serve.ListenWS(addrWs.Addr)
 	// tcp
 	conn := tcpConnection("localhost:8334", t)
 	conn.Write([]byte("TCP zoops"))
