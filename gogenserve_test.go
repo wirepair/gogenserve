@@ -4,45 +4,52 @@ import (
 	"code.google.com/p/go.net/websocket"
 	"fmt"
 	"net"
+	"sync"
 	"testing"
-	"time"
+	//"time"
 )
 
-type DefaultObserve struct {
+type DefaultListener struct {
+	wg   *sync.WaitGroup
+	addr *GenAddr
 }
 
-func (d *DefaultObserve) OnConnect(conn *GenConn) {
+func (d *DefaultListener) OnConnect(conn *GenConn) {
 	fmt.Printf("Yup got connection %v\n", conn)
+	d.wg.Done()
 }
 
-func (d *DefaultObserve) OnDisconnect(conn *GenConn) {
+func (d *DefaultListener) OnDisconnect(conn *GenConn) {
 	fmt.Printf("Yup connection dropped %v\n", conn)
 }
 
-func (d *DefaultObserve) OnRecv(conn *GenConn, data []byte) {
+func (d *DefaultListener) OnRecv(conn *GenConn, data []byte, size int) {
 	fmt.Printf("Yup got data %s from connection %v\n", conn, string(data))
 }
 
-func (d *DefaultObserve) OnError(conn *GenConn) {
-	fmt.Printf("Yup got error %v\n", conn)
+func (d *DefaultListener) OnError(conn *GenConn, err error) {
+	fmt.Printf("Yup got error on connection %v: %v\n", conn, err)
+}
+
+func (d *DefaultListener) Addr() *GenAddr {
+	return d.addr
+}
+
+func NewListener(proto, addr string) *DefaultListener {
+	l := new(DefaultListener)
+	l.addr = &GenAddr{Proto: proto, Addr: addr}
+	l.wg = new(sync.WaitGroup)
+	return l
 }
 
 func TestNewTcpServer(t *testing.T) {
-	addr := ":8333"
+	listener := NewListener("tcp", ":8333")
 	serve := NewGenServe()
-	conn := make(chan *GenConn, 1)
-	serve.ListenTCP(addr, conn)
-	for {
-		select {
-		case newConn := <-conn:
-			fmt.Printf("yup listening... and got connection: %v\n", newConn)
-			return
-		default:
-			tcpConnection("localhost"+addr, t)
-		}
-	}
+	serve.ListenTCP(listener)
+	listener.wg.Wait()
 }
 
+/*
 func TestNewWSServer(t *testing.T) {
 	serve := NewGenServe()
 	conn := make(chan *GenConn, 1)
@@ -106,7 +113,7 @@ func TestNewMultiServer(t *testing.T) {
 		}
 	}
 }
-
+*/
 func udpConnection(addr string, t *testing.T) {
 	connect("udp", addr, t)
 }
