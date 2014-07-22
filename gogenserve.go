@@ -63,7 +63,7 @@ func NewGenServe() *GenServe {
 // Listen - validates that the GenAddr is in correct form for TCP or UDP and listens on
 // the given address
 func (g *GenServe) Listen(addr *GenAddr, listener GenListener) {
-	if addr.Proto == "" || addr.Addr == "" {
+	if addr.Proto == "" || addr.Addr == "" || strings.HasPrefix(addr.Proto, "ws") {
 		log.Fatal("Protocol or Address invalid for Listen.")
 	}
 
@@ -126,7 +126,7 @@ func (g *GenServe) ListenTCP(addr *GenAddr, listener GenListener) {
 // go routine as well as reads put in their own go routines. Events dispatched to the listener.
 func (g *GenServe) listenTCP(addr *GenAddr, listener GenListener) {
 	if addr.Addr == "" {
-		log.Fatal("Address not set for UDP server")
+		log.Fatal("Address not set for TCP server")
 	}
 
 	ln, err := net.Listen(addr.Proto, addr.Addr)
@@ -165,7 +165,7 @@ func (g *GenServe) ListenWS(net string) {
 	go func() {
 		err := http.ListenAndServe(net, nil)
 		if err != nil {
-			log.Fatalf("error listening on %s: %v", net, err)
+			log.Fatalf("error listening on %s: %v\n", net, err)
 		}
 	}()
 }
@@ -175,7 +175,7 @@ func (g *GenServe) ListenWSS(net string, certFile, keyFile string) {
 	go func() {
 		err := http.ListenAndServeTLS(net, certFile, keyFile, nil)
 		if err != nil {
-			log.Fatalf("error listening on %s: %v", net, err)
+			log.Fatalf("error listening on %s: %v\n", net, err)
 		}
 	}()
 }
@@ -200,10 +200,9 @@ Loop:
 			}
 			listener.OnRecv(newConn, msg[:n], n)
 		case _ = <-interval:
-			listener.OnError(newConn, errors.New("An interval event fired in a server side."))
+			listener.OnError(newConn, errors.New("ws timed out since last read"))
 		}
 	}
-	//listener.OnDisconnect(newConn)
 }
 
 func createReadChannel(listener GenListener, conn *GenConn, msg []byte) chan int {
@@ -241,7 +240,6 @@ func read(listener GenListener, conn *GenConn) error {
 		}
 
 		if err != nil {
-			log.Printf("error %v\n", err)
 			listener.OnError(conn, err)
 			return err
 		}
