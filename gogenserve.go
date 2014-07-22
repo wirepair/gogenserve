@@ -4,11 +4,13 @@ import (
 	"code.google.com/p/go.net/websocket"
 	//"fmt"
 	"bytes"
+	"errors"
 	"io"
 	"log"
 	"net"
 	"net/http"
 	"strings"
+	"time"
 )
 
 // GenAddr - a generic address struct which holds
@@ -184,32 +186,64 @@ func (g *GenServe) ListenWSS(net string, certFile, keyFile string) {
 func webSocketHandler(ws *websocket.Conn, listener GenListener) {
 	newConn := &GenConn{Transport: "websocket", Conn: ws}
 	listener.OnConnect(newConn)
-	go func() {
-		//for ws.IsServerConn() {
-		log.Printf("start reading %v\n", ws.IsServerConn())
-		read(listener, newConn)
-		log.Printf("er, done reading %v\n", ws.IsServerConn())
-		//}
-	}()
-
+	msg := make([]byte, listener.ReadSize())
+	ch := CreateReadChannel(listener, newConn, msg)
+	interval := time.Tick(5 * 1e9) // TODO: allow timeout to be set by listener.
+Loop:
+	for {
+		// use select so we can block.
+		select {
+		case n := <-ch:
+			if n == 0 {
+				listener.OnDisconnect(newConn)
+				break Loop
+			}
+			listener.OnRecv(newConn, msg[:n], n)
+		case _ = <-interval:
+			listener.OnError(newConn, errors.New("An interval event fired in a server side."))
+		}
+	}
 	//listener.OnDisconnect(newConn)
+}
+
+func CreateReadChannel(listener GenListener, conn *GenConn, msg []byte) chan int {
+	ch := make(chan int)
+	go readWS(listener, conn, msg, ch)
+	return ch
+}
+
+func readWS(listener GenListener, conn *GenConn, msg []byte, ch chan int) {
+	for {
+		n, err := conn.Conn.Read(msg)
+		if err != nil {
+			listener.OnError(conn, err)
+			ch <- 0
+			break
+		}
+		ch <- n
+		if n == 0 {
+			break
+		}
+	}
 }
 
 // read - Reads bytes from theconnection and dispatches OnRecv events. If io.EOF is returned
 // by the underlying read, the connection is considered dead and an OnDisconnect event is dispatched.
-func read(listener GenListener, conn *GenConn) {
+func read(listener GenListener, conn *GenConn) error {
 	data := bytes.NewBuffer(nil)
 	msg := make([]byte, listener.ReadSize())
 	for {
+
 		n, err := conn.Conn.Read(msg[0:])
 		if err == io.EOF {
 			listener.OnDisconnect(conn)
-			return
+			return err
 		}
+
 		if err != nil {
 			log.Printf("error %v\n", err)
 			listener.OnError(conn, err)
-			return
+			return err
 		}
 		data.Write(msg[0:n])
 		listener.OnRecv(conn, data.Bytes(), len(data.Bytes()))
