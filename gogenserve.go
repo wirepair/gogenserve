@@ -187,7 +187,7 @@ func webSocketHandler(ws *websocket.Conn, listener GenListener) {
 	newConn := &GenConn{Transport: "websocket", Conn: ws}
 	listener.OnConnect(newConn)
 	msg := make([]byte, listener.ReadSize())
-	ch := CreateReadChannel(listener, newConn, msg)
+	ch := createReadChannel(listener, newConn, msg)
 	interval := time.Tick(5 * 1e9) // TODO: allow timeout to be set by listener.
 Loop:
 	for {
@@ -206,7 +206,7 @@ Loop:
 	//listener.OnDisconnect(newConn)
 }
 
-func CreateReadChannel(listener GenListener, conn *GenConn, msg []byte) chan int {
+func createReadChannel(listener GenListener, conn *GenConn, msg []byte) chan int {
 	ch := make(chan int)
 	go readWS(listener, conn, msg, ch)
 	return ch

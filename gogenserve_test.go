@@ -161,7 +161,7 @@ func wsConnection(addr, path string, t *testing.T) *websocket.Conn {
 	}
 	client, errWS := websocket.NewClient(newConfig(t, addr, path), conn)
 	if errWS != nil {
-		t.Fatalf("WebSocket handshake error: %v", errWS)
+		t.Fatalf("WebSocket handshake error: %v\n", errWS)
 	}
 	return client
 }
@@ -169,7 +169,7 @@ func wsConnection(addr, path string, t *testing.T) *websocket.Conn {
 func connect(proto, addr string, t *testing.T) net.Conn {
 	conn, err := net.Dial(proto, addr)
 	if err != nil {
-		t.Fatalf("error connecting to %s due to: %v", addr, err)
+		t.Fatalf("error connecting to %s due to: %v\n", addr, err)
 	}
 	return conn
 }
